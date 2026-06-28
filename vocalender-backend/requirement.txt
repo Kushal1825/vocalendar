@@ -1,0 +1,10 @@
+fastapi 
+uvicorn 
+httpx 
+python-multipart 
+faster-whisper 
+python-dotenv
+pydantic
+langchain_groq
+langchain
+dotenv
