@@ -1,146 +1,185 @@
 import { useState, useEffect } from "react";
+import { SignedIn, SignedOut, SignInButton, useAuth, UserButton } from "@clerk/clerk-react";
 import { useRecorder } from "./hooks/useRecorder";
+import { useNotification } from "./hooks/useNotification";
 import ConfirmationCard from "./components/ConfirmationCard";
 import axios from "axios";
 
-import { useNotification } from "./hooks/useNotification";
-
-
 export default function App() {
+  const { getToken } = useAuth();
   const { recording, audioBlob, start, stop } = useRecorder();
+  const { requestPermission, scheduleNotification } = useNotification();
   const [transcript, setTranscript] = useState("");
   const [extracted, setExtracted] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [status, setStatus] = useState("idle"); // idle | transcribing | extracting | confirming
-
+  const [status, setStatus] = useState("idle");
   const [error, setError] = useState("");
-  const [authenticated, setAuthenticated] = useState(false);
+
+  const [calendarConnected, setCalendarConnected] = useState(false);
 
 useEffect(() => {
-  axios.get("http://localhost:8000/auth/status")
-    .then(res => setAuthenticated(res.data.authenticated))
-    .catch(() => setAuthenticated(false));
+  checkCalendarStatus();
 }, []);
 
+const checkCalendarStatus = async () => {
+  try {
+    const res = await authGet("http://localhost:8000/auth/status");
+    setCalendarConnected(res.data.authenticated);
+  } catch (err) {
+    setCalendarConnected(false);
+  }
+};
 
-// inside App()
-const { requestPermission, scheduleNotification } = useNotification();
+const connectCalendar = async () => {
+  try {
+    const res = await authGet("http://localhost:8000/auth/google");
+    window.location.href = res.data.auth_url;
+  } catch (err) {
+    setError("Failed to connect Google Calendar.");
+  }
+};
 
-useEffect(() => {
-  requestPermission();
-}, []);
+  useEffect(() => {
+    requestPermission();
+  }, []);
+
+  useEffect(() => {
+    if (audioBlob) sendAudio(audioBlob);
+  }, [audioBlob]);
+
+  // authenticated axios helpers
+  const authPost = async (url, data, config = {}) => {
+    const token = await getToken();
+    return axios.post(url, data, {
+      ...config,
+      headers: {
+        ...config.headers,
+        Authorization: `Bearer ${token}`
+      }
+    });
+  };
+
+  const authGet = async (url) => {
+    const token = await getToken();
+    return axios.get(url, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+  };
 
   const sendAudio = async (blob) => {
     if (!blob) return;
+    setError("");
     setStatus("transcribing");
 
     const formData = new FormData();
     formData.append("file", blob, "recording.webm");
 
     try {
-      const res = await axios.post(
+      const res = await authPost(
         "http://localhost:8000/transcribe",
         formData,
+        { headers: { "Content-Type": "multipart/form-data" } }
       );
       setTranscript(res.data.transcript);
       await extractTask(res.data.transcript);
     } catch (err) {
       console.error(err);
-      setStatus("idle");
       setError("Transcription failed. Please try again.");
       setStatus("idle");
     }
   };
 
-  const handleConfirm = async (confirmedData) => {
-  try {
-    const startDateTime = `${confirmedData.date}T${confirmedData.time}:00`;
-    const userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    // calculate end time without UTC conversion
-    const [hours, minutes] = confirmedData.time.split(":").map(Number);
-    const endHour = String(hours + 1).padStart(2, "0");
-    const endDateTime = `${confirmedData.date}T${endHour}:${String(minutes).padStart(2, "0")}:00`;
-
-    await axios.post("http://localhost:8000/calendar/create", {
-      task: confirmedData.task,
-      start_datetime: startDateTime,
-      end_datetime: endDateTime,
-      priority: confirmedData.priority,
-      timezone: userTimezone
-    });
-
-    scheduleNotification(confirmedData.task, `${confirmedData.date}T${confirmedData.time}:00`);
-
-    setStatus("success");
-
-    setTimeout(() => {
-      setStatus("idle");
-      setExtracted(null);
-      setTranscript("");
-    }, 3000);
-
-  } catch (err) {
-    console.error(err);
-    setError("Failed to save to calendar. Please try again.");
-  }
-};
-
   const extractTask = async (text) => {
     setStatus("extracting");
     try {
-      const res = await axios.post("http://localhost:8000/extract", {
-        transcript: text,
+      const res = await authPost("http://localhost:8000/extract", {
+        transcript: text
       });
       setExtracted(res.data);
       setStatus("confirming");
     } catch (err) {
       console.error(err);
+      setError("Extraction failed. Please try again.");
       setStatus("idle");
     }
   };
 
-  useEffect(() => {
-    if (audioBlob) sendAudio(audioBlob);
-  }, [audioBlob]);
+  const handleConfirm = async (confirmedData) => {
+    try {
+      const userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      const startDateTime = `${confirmedData.date}T${confirmedData.time}:00`;
+      const [hours, minutes] = confirmedData.time.split(":").map(Number);
+      const endHour = String(hours + 1).padStart(2, "0");
+      const endDateTime = `${confirmedData.date}T${endHour}:${String(minutes).padStart(2, "0")}:00`;
 
-  
+      await authPost("http://localhost:8000/calendar/create", {
+        task: confirmedData.task,
+        start_datetime: startDateTime,
+        end_datetime: endDateTime,
+        priority: confirmedData.priority,
+        timezone: userTimezone
+      });
+
+      scheduleNotification(confirmedData.task, startDateTime);
+      setStatus("success");
+
+      setTimeout(() => {
+        setStatus("idle");
+        setExtracted(null);
+        setTranscript("");
+      }, 3000);
+
+    } catch (err) {
+      console.error(err);
+      setError("Failed to save to calendar. Please try again.");
+    }
+  };
 
   const handleCancel = () => {
     setStatus("idle");
     setExtracted(null);
     setTranscript("");
+    setError("");
   };
 
-
-// in sendAudio catch block:
-// in handleConfirm catch block:
-
-// in JSX — show error message:
-{error && (
-  <div className="bg-red-900 rounded-xl p-4 max-w-md w-full text-center">
-    <p className="text-red-300 text-sm">{error}</p>
-  </div>
-)}
-
-  if (!authenticated) {
   return (
     <div className="min-h-screen bg-gray-950 text-white flex flex-col items-center justify-center gap-6">
+       <div className="absolute top-4 right-4">
+        <SignedIn>
+          <UserButton afterSignOutUrl="/" />
+        </SignedIn>
+      </div>
       <h1 className="text-3xl font-bold">Vocalendar</h1>
-      <p className="text-gray-400">Connect your Google Calendar to get started</p>
-      
-      <a
-        href="http://localhost:8000/auth/google"
-        className="bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-3 rounded-lg font-bold transition-all"
+
+      {/* not signed in */}
+      <SignedOut>
+        <p className="text-gray-400">Sign in to get started</p>
+        <SignInButton mode="modal">
+          <button className="bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-3 rounded-lg font-bold transition-all">
+            Sign in with Google
+          </button>
+        </SignInButton>
+      </SignedOut>
+
+      {/* signed in */}
+      <SignedIn>
+  {!calendarConnected ? (
+    <div className="flex flex-col items-center gap-4">
+      <p className="text-gray-400">Connect your Google Calendar to continue</p>
+      <button
+        onClick={connectCalendar}
+        className="bg-green-600 hover:bg-green-500 text-white px-6 py-3 rounded-lg font-bold transition-all"
       >
         Connect Google Calendar
-      </a>
+      </button>
     </div>
-  );
-}else{
-return (
-    <div className="min-h-screen bg-gray-950 text-white flex flex-col items-center justify-center gap-6">
-      
-      <h1 className="text-3xl font-bold">Vocalendar</h1>
+  ) : (
+    // your existing mic button + confirmation card UI
+    <>
+      {error && (
+        <div className="bg-red-900 rounded-xl p-4 max-w-md w-full text-center">
+          <p className="text-red-300 text-sm">{error}</p>
+        </div>
+      )}
 
       {status === "confirming" && extracted ? (
         <ConfirmationCard
@@ -162,34 +201,20 @@ return (
             {recording ? "Stop" : "Record"}
           </button>
 
-          {status === "transcribing" && (
-            <p className="text-gray-400">Transcribing...</p>
-          )}
-          {status === "extracting" && (
-            <p className="text-gray-400">Extracting task...</p>
-          )}
+          {status === "transcribing" && <p className="text-gray-400">Transcribing...</p>}
+          {status === "extracting" && <p className="text-gray-400">Extracting task...</p>}
 
-          {transcript && status === "idle" && (
-            <div className="bg-gray-800 rounded-xl p-4 max-w-md w-full">
-              <p className="text-sm text-gray-400 mb-1">Transcript</p>
-              <p className="text-white">{transcript}</p>
-            </div>
-          )}
           {status === "success" && (
             <div className="bg-green-800 rounded-xl p-4 max-w-md w-full text-center">
-              <p className="text-green-300 font-bold text-lg">
-                ✓ Added to Google Calendar
-              </p>
-              <p className="text-gray-400 text-sm mt-1">
-                Resetting in 3 seconds...
-              </p>
+              <p className="text-green-300 font-bold text-lg">✓ Added to Google Calendar</p>
+              <p className="text-gray-400 text-sm mt-1">Resetting in 3 seconds...</p>
             </div>
           )}
         </>
       )}
+    </>
+  )}
+</SignedIn>
     </div>
   );
-}
-
-  
 }
