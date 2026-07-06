@@ -1,7 +1,6 @@
 from fastapi import HTTPException, Header
 import jwt
 import httpx
-from app.config import settings
 
 CLERK_JWKS_URL = None
 

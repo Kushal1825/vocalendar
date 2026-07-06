@@ -86,3 +86,10 @@ def check_availability(user_id: str, date: str, time: str, duration_minutes: int
     result = service.freebusy().query(body=body).execute()
     busy = result["calendars"]["primary"]["busy"]
     return {"available": len(busy) == 0, "busy_slots": busy}
+
+def delete_event(user_id: str, calendar_event_id: str):
+    service = get_calendar_service(user_id)
+    service.events().delete(
+        calendarId="primary",
+        eventId=calendar_event_id
+    ).execute()

@@ -89,8 +89,29 @@ async def remove_task(
     current_user: dict = Depends(get_current_user)
 ):
     try:
-        from app.services.supabase_service import delete_task
+        from app.services.supabase_service import get_task_by_id, delete_task
+        from app.services.calendar_service import delete_event
+
+        # get task first to find calendar_event_id
+        task = get_task_by_id(current_user["user_id"], task_id)
+
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+
+        # delete from Google Calendar if event_id exists
+        if task.get("calendar_event_id"):
+            try:
+                delete_event(current_user["user_id"], task["calendar_event_id"])
+            except Exception as cal_err:
+                # log but don't fail — event may already be deleted in Google
+                print(f"Calendar delete warning: {cal_err}")
+
+        # delete from Supabase
         delete_task(current_user["user_id"], task_id)
+
         return {"message": "Task deleted successfully"}
+
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))

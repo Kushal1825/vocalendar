@@ -81,3 +81,9 @@ def delete_task(clerk_user_id: str, task_id: str):
 
 def delete_google_tokens(clerk_user_id: str):
     supabase.table("google_tokens").delete().eq("user_id", clerk_user_id).execute()
+
+def get_task_by_id(clerk_user_id: str, task_id: str):
+    result = supabase.table("tasks").select("*").eq("id", task_id).eq("user_id", clerk_user_id).execute()
+    if not result.data:
+        return None
+    return result.data[0]
