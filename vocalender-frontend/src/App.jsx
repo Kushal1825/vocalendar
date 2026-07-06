@@ -21,6 +21,8 @@ import ProtectedRoute from "./components/layout/ProtectedRoute";
 
 // constants
 import { ROUTES } from "./constants/routes";
+import PrivacyPage from "./pages/PrivacyPage";
+import TermsPage from "./pages/TermsPage";
 
 export default function App() {
   return (
@@ -71,6 +73,8 @@ export default function App() {
           }
         />
 
+        <Route path={ROUTES.PRIVACY} element={<PrivacyPage />} />
+        <Route path={ROUTES.TERMS} element={<TermsPage />} />
         {/* ── fallback ── */}
         <Route path={ROUTES.NOT_FOUND} element={<NotFoundPage />} />
       </Routes>
